@@ -1,74 +1,88 @@
 # SSE Playground
 
-A hands-on project for learning **Server-Sent Events (SSE)** — the simplest way to push real-time data from a server to a browser.
+> A hands-on project for learning **Server-Sent Events (SSE)** — the simplest way to push real-time data from a server to a browser.
 
-Built with **FastAPI** (Python) and **vanilla JavaScript**. No frontend framework, no build step — so you can focus entirely on understanding SSE.
+[![CI](https://github.com/fellipegpbotelho/sse-playground/actions/workflows/ci.yml/badge.svg)](https://github.com/fellipegpbotelho/sse-playground/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.12+-blue)
+![uv](https://img.shields.io/badge/uv-package%20manager-purple)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+Built with **FastAPI** + **vanilla JavaScript**. No frontend framework, no build step — so you can focus entirely on SSE.
 
 ![SSE Playground preview](docs/preview.png)
 
+---
+
 ## What you will learn
 
-- What SSE is and how it differs from WebSockets and polling
-- The raw wire format (`data:`, `event:`, `id:`, `retry:`)
-- How the browser's `EventSource` API works
-- How to implement SSE streams in FastAPI with async generators
-- Auto-reconnect and the `Last-Event-ID` mechanism
-- How to push events from the server on demand (via a queue)
+| | Concept |
+|---|---|
+| 📡 | What SSE is and how it differs from WebSockets and polling |
+| 🔌 | The raw wire format — `data:`, `event:`, `id:`, `retry:` |
+| 🌐 | How the browser `EventSource` API works |
+| 🐍 | How to implement SSE streams in FastAPI with async generators |
+| 🔄 | Auto-reconnect and the `Last-Event-ID` mechanism |
+| 📬 | How to push events on demand via a server-side queue |
 
-## How it works
+---
 
-```
-Browser                            FastAPI
-  |                                   |
-  |── GET /stream/notifications ─────►|
-  |                                   |  async generator runs forever
-  |◄── event: info\ndata: {...}\n\n ──|  yields every 2 s
-  |◄── event: alert\ndata: {...}\n\n ─|
-  |                                   |
-  |── GET /stream/progress ──────────►|
-  |◄── id: 0\ndata: {"pct":0}\n\n ───|  yields 10 steps, then closes
-  |◄── id: 1\ndata: {"pct":10}\n\n ──|
-  |                                   |
-  |── GET /stream/logs ──────────────►|
-  |◄── data: {"msg":"connected"}\n\n ─|  yields from asyncio.Queue
-  |                                   |
-  |── POST /trigger-log ─────────────►|  you push a message
-  |◄── data: {"msg":"your msg"}\n\n ──|  stream delivers it
-```
-
-## Project structure
-
-```
-.
-├── main.py          # FastAPI app — all three SSE endpoints
-├── pyproject.toml   # uv project config
-├── static/
-│   └── index.html   # Vanilla JS frontend, three panels
-└── README.md
-```
-
-## Running locally
-
-Requires [uv](https://docs.astral.sh/uv/).
+## Quickstart
 
 ```bash
-git clone https://github.com/your-username/sse-playground
+git clone https://github.com/fellipegpbotelho/sse-playground
 cd sse-playground
 uv sync
-uv run uvicorn main:app --reload
+make dev
 ```
 
 Open [http://localhost:8000](http://localhost:8000).
 
-> **Tip:** open DevTools → Network → click any `/stream/*` request → EventStream tab to see the raw SSE frames as they arrive.
+> **Tip:** DevTools → Network → click any `/stream/*` request → **EventStream** tab to see the raw frames as they arrive.
+
+Or run with Docker:
+
+```bash
+make docker-build
+make docker-run
+```
+
+---
+
+## How it works
+
+A single HTTP `GET` — the server keeps writing `data: …\n\n` lines, and the browser fires a JS event for each one.
+
+```
+Browser                              FastAPI
+   │                                    │
+   │──── GET /stream/notifications ────►│
+   │                                    │  async generator, runs forever
+   │◄─── event: info                    │
+   │     data: {"msg":"System healthy"} │  yields every 2 s
+   │                                    │
+   │◄─── event: alert                   │
+   │     data: {"msg":"High CPU!"}      │
+   │                                    │
+   │──── GET /stream/progress ─────────►│
+   │◄─── id: 0 / data: {"pct": 0}      │  yields 10 steps, then closes
+   │◄─── id: 1 / data: {"pct": 10}     │
+   │                                    │
+   │──── GET /stream/logs ─────────────►│
+   │◄─── data: {"msg":"connected"}      │  reads from asyncio.Queue
+   │                                    │
+   │──── POST /trigger-log ────────────►│  you push a message
+   │◄─── data: {"msg":"your message"}   │  stream delivers it live
+```
+
+---
 
 ## The three streams
 
-### Stream 1 — Notifications (`GET /stream/notifications`)
+### 1 · Notifications — named events
 
-Pushes a named event every 2 seconds. Demonstrates the `event:` field — the browser
-uses `addEventListener('info', …)` and `addEventListener('alert', …)` instead of the
-generic `onmessage`.
+`GET /stream/notifications`
+
+Pushes an event every 2 s. Uses the `event:` field so the browser can distinguish event types with `addEventListener` instead of the generic `onmessage`.
 
 ```
 event: info
@@ -78,13 +92,21 @@ event: alert
 data: {"id": 2, "message": "High memory usage detected!", "timestamp": "..."}
 ```
 
-### Stream 2 — Progress (`GET /stream/progress`)
+```js
+source.addEventListener('info',  (e) => { /* only info events  */ })
+source.addEventListener('alert', (e) => { /* only alert events */ })
+```
 
-Yields 10 steps then closes the stream. Demonstrates the `id:` and `retry:` fields.
+---
 
-- `id:` — the browser stores this as `lastEventId`. On reconnect it sends a
-  `Last-Event-ID` request header so the server knows where to resume.
-- `retry: 3000` — overrides the browser's default reconnect delay to 3 seconds.
+### 2 · Progress — `id:` and `retry:`
+
+`GET /stream/progress`
+
+Yields 10 steps then closes. Demonstrates two underused SSE fields:
+
+- **`id:`** — the browser stores this as `lastEventId` and sends it as a `Last-Event-ID` request header on reconnect, so the server can resume from the right step.
+- **`retry:`** — overrides the browser's reconnect delay (default ~3 s).
 
 ```
 id: 3
@@ -92,12 +114,13 @@ retry: 3000
 data: {"step": 3, "percent": 30, "done": false}
 ```
 
-### Stream 3 — Logs (`GET /stream/logs`)
+---
 
-Events are queued server-side in an `asyncio.Queue`. A separate `POST /trigger-log`
-endpoint inserts entries into the queue, which the open SSE stream delivers immediately.
-Also sends SSE comment lines (`: heartbeat`) every 15 seconds to prevent intermediate
-proxies from closing idle connections.
+### 3 · Logs — server-side queue + heartbeat
+
+`GET /stream/logs`
+
+Events are queued in an `asyncio.Queue`. A separate `POST /trigger-log` writes into it; the open stream delivers the entry immediately. Also sends SSE **comment lines** every 15 s to prevent proxies from closing the idle connection.
 
 ```
 : heartbeat
@@ -105,37 +128,42 @@ proxies from closing idle connections.
 data: {"level": "MANUAL", "msg": "Hello from the browser!", "ts": "..."}
 ```
 
-## SSE wire format reference
+---
 
-Events are plain text, separated by a blank line (`\n\n`).
+## SSE wire format
 
-| Field | Example | Purpose |
+Events are plain text separated by a **blank line** (`\n\n`). The content-type must be `text/event-stream`.
+
+| Field | Example | What it does |
 |---|---|---|
-| `data:` | `data: {"msg":"hi"}` | The payload. Repeat for multi-line values. |
-| `event:` | `event: alert` | Named event type. Triggers `addEventListener('alert', …)`. |
-| `id:` | `id: 42` | Event bookmark. Sent as `Last-Event-ID` on reconnect. |
-| `retry:` | `retry: 3000` | Browser reconnect delay in milliseconds. |
+| `data:` | `data: {"msg":"hi"}` | The payload. Repeat the field for multi-line values. |
+| `event:` | `event: alert` | Names the event. Browser routes it to `addEventListener('alert', …)`. |
+| `id:` | `id: 42` | Bookmarks the stream. Browser sends it as `Last-Event-ID` on reconnect. |
+| `retry:` | `retry: 3000` | Sets the browser reconnect delay in ms. |
 | `: comment` | `: heartbeat` | Ignored by browser; resets proxy idle timers. |
+
+---
 
 ## SSE vs WebSockets vs Polling
 
-| | SSE | WebSockets | Short Polling |
-|---|---|---|---|
+| | SSE | WebSockets | Polling |
+|---|:---:|:---:|:---:|
 | Direction | Server → Client | Bidirectional | Client pulls |
-| Protocol | HTTP/1.1+ | Upgraded TCP (`ws://`) | HTTP |
-| Auto-reconnect | Built-in | You implement it | N/A |
-| Binary support | No (text only) | Yes | Yes |
-| Proxy friendly | Yes | Sometimes blocked | Yes |
+| Protocol | HTTP | Upgraded TCP (`ws://`) | HTTP |
+| Auto-reconnect | ✅ Built-in | ❌ Manual | — |
+| Binary support | ❌ Text only | ✅ | ✅ |
+| Proxy friendly | ✅ | ⚠️ Sometimes blocked | ✅ |
 | Complexity | Low | Medium | Low |
 
-**Use SSE when** the server needs to push data and the client doesn't need to stream back.  
-Common examples: live notifications, progress bars, log tailing, AI token streaming (how ChatGPT streams responses).
+**Use SSE** when the server pushes and the client only listens — notifications, progress bars, log tailing, AI token streaming.
 
-**Use WebSockets when** you need low-latency bidirectional communication: chat, multiplayer games, collaborative editing.
+**Use WebSockets** when you need bidirectional real-time communication — chat, multiplayer games, collaborative editing.
+
+---
 
 ## Key concepts in code
 
-### Server — async generator pattern
+**Server — async generator**
 
 ```python
 @app.get("/stream/example")
@@ -143,30 +171,25 @@ async def stream(request: Request):
     async def generator():
         while True:
             if await request.is_disconnected():
-                break                          # clean up when the tab closes
+                break                           # clean up when tab closes
             yield {"event": "ping", "data": "hello"}
-            await asyncio.sleep(1)             # must await to yield the event loop
+            await asyncio.sleep(1)              # must await to release the event loop
 
     return EventSourceResponse(generator())
 ```
 
-### Browser — EventSource API
+**Browser — EventSource API**
 
 ```js
 const source = new EventSource('/stream/example')
 
-// Generic handler (no event: field on the server side)
-source.onmessage = (e) => console.log(e.data)
-
-// Named event handler
-source.addEventListener('ping', (e) => console.log(e.data))
-
-// Reconnect state
-source.onerror = () => console.log('dropped — browser will retry automatically')
-
-// Manual close
-source.close()
+source.onmessage = (e) => console.log(e.data)               // unnamed events
+source.addEventListener('ping', (e) => console.log(e.data)) // named events
+source.onerror = () => console.log('dropped — will retry automatically')
+source.close()                                               // manual disconnect
 ```
+
+---
 
 ## License
 
