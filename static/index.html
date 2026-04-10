@@ -262,6 +262,32 @@
 
   </div>
 
+  <!-- Wire Tap -->
+  <div class="panel" style="margin-top:16px;">
+    <h2>Wire Tap — Raw SSE Frames</h2>
+    <p class="desc">
+      Reconstructs the actual <code>text/event-stream</code> wire format from every event fired across
+      all streams. This is what you'd see in DevTools → Network → EventStream — without leaving the page.
+      Filter by stream or watch all at once.
+    </p>
+    <div class="controls">
+      <label style="font-size:0.8rem;color:#8b949e;">Stream:</label>
+      <select id="tap-filter" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:6px;font-size:0.8rem;font-family:monospace;">
+        <option value="all">all</option>
+        <option value="notifications">notifications</option>
+        <option value="progress">progress</option>
+        <option value="logs">logs</option>
+        <option value="ai">ai</option>
+        <option value="unstable">unstable</option>
+        <option value="broadcast">broadcast</option>
+      </select>
+      <button onclick="clearTap()">Clear</button>
+    </div>
+    <div class="log-area" style="height:260px;font-size:0.76rem;">
+      <div class="inner" id="tap-inner"></div>
+    </div>
+  </div>
+
   <!-- SSE Concept Table -->
   <div class="explainer">
     <h2>SSE Wire Format — Quick Reference</h2>
@@ -279,6 +305,41 @@
   </div>
 
   <script>
+    // -----------------------------------------------------------------------
+    // Wire tap — records raw SSE frames from all streams
+    // -----------------------------------------------------------------------
+
+    // Stream name → short colour class for the tap log
+    const TAP_COLORS = {
+      notifications: 'info',
+      progress:      'manual',
+      logs:          'system',
+      ai:            'info',
+      unstable:      'alert',
+      broadcast:     'manual',
+    };
+
+    // Called by each panel's event handlers to push a frame into the tap.
+    // Reconstructs the text/event-stream wire format from the EventSource event object.
+    function tapRecord(streamName, eventType, data, id) {
+      const filter = document.getElementById('tap-filter').value;
+      if (filter !== 'all' && filter !== streamName) return;
+
+      // Reconstruct the SSE wire frame
+      let frame = '';
+      if (eventType && eventType !== 'message') frame += `event: ${eventType}\n`;
+      if (id)                                    frame += `id: ${id}\n`;
+      frame += `data: ${data}`;
+
+      const prefix = `[${streamName}]  `;
+      const cls    = TAP_COLORS[streamName] || 'system';
+      appendLog('tap-inner', prefix + frame, cls);
+    }
+
+    function clearTap() {
+      document.getElementById('tap-inner').innerHTML = '';
+    }
+
     // -----------------------------------------------------------------------
     // readyState helpers
     // -----------------------------------------------------------------------
@@ -332,11 +393,13 @@
       notifReadyInterval = trackReadyState(notifSource, 'notif-ready');
 
       notifSource.addEventListener('info', (e) => {
+        tapRecord('notifications', 'info', e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         appendLog('notif-inner', `[INFO #${d.id}] ${d.message}  (${d.timestamp})`, 'info');
       });
 
       notifSource.addEventListener('alert', (e) => {
+        tapRecord('notifications', 'alert', e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         appendLog('notif-inner', `[ALERT #${d.id}] ${d.message}  (${d.timestamp})`, 'alert');
       });
@@ -373,6 +436,7 @@
       progressReadyInterval = trackReadyState(progressSource, 'progress-ready');
 
       progressSource.onmessage = (e) => {
+        tapRecord('progress', null, e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         // Update Last-Event-ID display — this is what the browser will send on reconnect
         document.getElementById('progress-last-id').textContent = e.lastEventId || '—';
@@ -410,6 +474,7 @@
       logsReadyInterval = trackReadyState(logsSource, 'logs-ready');
 
       logsSource.onmessage = (e) => {
+        tapRecord('logs', null, e.data, e.lastEventId);
         const d   = JSON.parse(e.data);
         const cls = d.level === 'MANUAL' ? 'manual' : d.level === 'INFO' ? 'info' : 'system';
         appendLog('logs-inner', `[${d.ts}] ${d.level}: ${d.msg}`, cls);
@@ -457,6 +522,7 @@
       unstableReadyInterval = trackReadyState(unstableSource, 'unstable-ready');
 
       unstableSource.onmessage = (e) => {
+        tapRecord('unstable', null, e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         document.getElementById('unstable-last-id').textContent = e.lastEventId || '—';
         const resumed = d.resumed_from ? ` (resumed from id ${d.resumed_from})` : '';
@@ -497,6 +563,7 @@
       aiReadyInterval = trackReadyState(aiSource, 'ai-ready');
 
       aiSource.onmessage = (e) => {
+        tapRecord('ai', null, e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         document.getElementById('ai-last-id').textContent = e.lastEventId || '—';
         document.getElementById('ai-output').textContent += d.token;
@@ -533,6 +600,7 @@
       broadcastReadyInterval = trackReadyState(broadcastSource, 'broadcast-ready');
 
       broadcastSource.onmessage = (e) => {
+        tapRecord('broadcast', null, e.data, e.lastEventId);
         const d = JSON.parse(e.data);
         appendLog('broadcast-inner', `[${d.ts}] ${d.msg}  (${d.clients} client(s) connected)`, 'info');
       };
