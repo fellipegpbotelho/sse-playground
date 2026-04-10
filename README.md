@@ -21,8 +21,12 @@ Built with **FastAPI** + **vanilla JavaScript**. No frontend framework, no build
 | 🔌 | The raw wire format — `data:`, `event:`, `id:`, `retry:` |
 | 🌐 | How the browser `EventSource` API works |
 | 🐍 | How to implement SSE streams in FastAPI with async generators |
-| 🔄 | Auto-reconnect and the `Last-Event-ID` mechanism |
+| 🔄 | Auto-reconnect and the `Last-Event-ID` resumption mechanism |
 | 📬 | How to push events on demand via a server-side queue |
+| 📣 | Fan-out broadcasting to multiple clients simultaneously |
+| 🤖 | Token-by-token AI streaming (how ChatGPT works under the hood) |
+| 💥 | `readyState` lifecycle and reconnect behaviour on connection drops |
+| 🔍 | How to read raw SSE wire frames without opening DevTools |
 
 ---
 
@@ -76,13 +80,13 @@ Browser                              FastAPI
 
 ---
 
-## The three streams
+## The six streams
 
 ### 1 · Notifications — named events
 
 `GET /stream/notifications`
 
-Pushes an event every 2 s. Uses the `event:` field so the browser can distinguish event types with `addEventListener` instead of the generic `onmessage`.
+Pushes an event every 2 s. Uses the `event:` field so the browser distinguishes event types with `addEventListener` instead of the generic `onmessage`.
 
 ```
 event: info
@@ -105,7 +109,7 @@ source.addEventListener('alert', (e) => { /* only alert events */ })
 
 Yields 10 steps then closes. Demonstrates two underused SSE fields:
 
-- **`id:`** — the browser stores this as `lastEventId` and sends it as a `Last-Event-ID` request header on reconnect, so the server can resume from the right step.
+- **`id:`** — the browser stores this as `lastEventId` and sends it as a `Last-Event-ID` request header on reconnect so the server can resume from the right step.
 - **`retry:`** — overrides the browser's reconnect delay (default ~3 s).
 
 ```
@@ -118,15 +122,60 @@ data: {"step": 3, "percent": 30, "done": false}
 
 ### 3 · Logs — server-side queue + heartbeat
 
-`GET /stream/logs`
+`GET /stream/logs` · `POST /trigger-log`
 
-Events are queued in an `asyncio.Queue`. A separate `POST /trigger-log` writes into it; the open stream delivers the entry immediately. Also sends SSE **comment lines** every 15 s to prevent proxies from closing the idle connection.
+Events are queued in an `asyncio.Queue`. A separate `POST /trigger-log` writes into it; the open stream delivers the entry immediately. Also sends SSE **comment lines** every 15 s to prevent proxies from closing idle connections.
 
 ```
 : heartbeat
 
 data: {"level": "MANUAL", "msg": "Hello from the browser!", "ts": "..."}
 ```
+
+---
+
+### 4 · AI token streaming — word-by-word
+
+`GET /stream/ai`
+
+Yields a response one word at a time. This is the exact pattern used by ChatGPT, Claude, and every LLM chat UI. Each token carries an `id:` so streaming can resume mid-sentence if the connection drops.
+
+```
+id: 12
+data: {"token": "automatically ", "done": false}
+```
+
+---
+
+### 5 · Broadcast — fan-out to all clients
+
+`GET /stream/broadcast` · `POST /broadcast`
+
+Each connected client gets its own `asyncio.Queue`. `POST /broadcast` puts the same message into every queue simultaneously. Open the page in two tabs, connect both, and send a message — both receive it instantly.
+
+```
+data: {"msg": "Hello everyone!", "clients": 2, "ts": "..."}
+```
+
+---
+
+### 6 · Unstable connection — auto-reconnect in action
+
+`GET /stream/unstable`
+
+The server deliberately closes the connection after 2–5 events. The browser auto-reconnects and sends `Last-Event-ID`, so the server resumes the counter from where it left off. Watch the `readyState` badge cycle through OPEN → CLOSED → CONNECTING → OPEN.
+
+```
+id: 7
+retry: 1500
+data: {"count": 7, "will_drop_in": 2, "resumed_from": "4", "ts": "..."}
+```
+
+---
+
+### Wire tap — built-in raw frame viewer
+
+A full-width panel at the bottom reconstructs the actual `text/event-stream` wire format from every event fired across all streams. Filter by stream or watch all at once — no DevTools needed.
 
 ---
 
