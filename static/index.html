@@ -215,9 +215,9 @@
       <div id="ai-output" style="background:#010409;border:1px solid #30363d;border-radius:4px;padding:10px;min-height:80px;font-size:0.85rem;line-height:1.7;color:#c9d1d9;white-space:pre-wrap;"></div>
     </div>
 
-    <!-- Panel 6: Unstable connection -->
+    <!-- Panel 5: Unstable connection -->
     <div class="panel">
-      <h2>Stream 6 — Unstable Connection</h2>
+      <h2>Stream 5 — Unstable Connection</h2>
       <p class="desc">
         The server deliberately closes the connection after 2–5 events.
         Watch the <code>readyState</code> cycle through OPEN → CLOSED → CONNECTING → OPEN.
@@ -237,9 +237,9 @@
       <div class="log-area"><div class="inner" id="unstable-inner"></div></div>
     </div>
 
-    <!-- Panel 5: Broadcast (was Panel 4) -->
+    <!-- Panel 6: Broadcast -->
     <div class="panel">
-      <h2>Stream 4 — Broadcast</h2>
+      <h2>Stream 6 — Broadcast</h2>
       <p class="desc">
         Fan-out pattern: one <code>POST /broadcast</code> delivers the same message to
         <em>every</em> connected client simultaneously. Each client has its own
