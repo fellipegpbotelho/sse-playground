@@ -7,10 +7,12 @@ Streams:
   /stream/logs           — async queue, manual push via POST /trigger-log
   /stream/broadcast      — fan-out: one POST pushes to ALL connected clients
   /stream/ai             — token-by-token streaming, like ChatGPT
+  /stream/unstable       — randomly drops the connection to show auto-reconnect + Last-Event-ID
 """
 
 import asyncio
 import json
+import random
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
@@ -241,6 +243,56 @@ async def broadcast(request: Request):
     for q in broadcast_clients:
         await q.put(entry)
     return {"delivered_to": len(broadcast_clients)}
+
+
+# ---------------------------------------------------------------------------
+# Stream 6: Unstable connection — random drops to demonstrate auto-reconnect
+# ---------------------------------------------------------------------------
+
+
+@app.get("/stream/unstable")
+async def stream_unstable(request: Request):
+    """
+    Yields events then deliberately closes the connection after a random number of events.
+    The browser automatically reconnects and sends Last-Event-ID, so the server resumes
+    the counter from where it left off instead of starting at zero.
+
+    SSE fields demonstrated:
+      - id:    counter value — used to resume after reconnect
+      - retry: 1500 ms — faster reconnect so the drop is clearly visible
+    """
+    # Resume from where we left off if the browser sends Last-Event-ID
+    last_id = request.headers.get("last-event-id")
+    counter = int(last_id) + 1 if last_id else 0
+
+    # Drop after a random number of events (2–5)
+    drop_after = random.randint(2, 5)
+
+    async def generator():
+        nonlocal counter
+        sent = 0
+        while sent < drop_after:
+            if await request.is_disconnected():
+                break
+            yield {
+                "id": str(counter),
+                "retry": 1500,
+                "data": json.dumps(
+                    {
+                        "count": counter,
+                        "will_drop_in": drop_after - sent,
+                        "resumed_from": last_id,
+                        "ts": _now(),
+                    }
+                ),
+            }
+            counter += 1
+            sent += 1
+            await asyncio.sleep(1)
+        # Generator returns without yielding → server closes the connection.
+        # Browser sees the drop, waits retry ms, reconnects with Last-Event-ID.
+
+    return EventSourceResponse(generator())
 
 
 # ---------------------------------------------------------------------------

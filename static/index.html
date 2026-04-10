@@ -215,6 +215,28 @@
       <div id="ai-output" style="background:#010409;border:1px solid #30363d;border-radius:4px;padding:10px;min-height:80px;font-size:0.85rem;line-height:1.7;color:#c9d1d9;white-space:pre-wrap;"></div>
     </div>
 
+    <!-- Panel 6: Unstable connection -->
+    <div class="panel">
+      <h2>Stream 6 — Unstable Connection</h2>
+      <p class="desc">
+        The server deliberately closes the connection after 2–5 events.
+        Watch the <code>readyState</code> cycle through OPEN → CLOSED → CONNECTING → OPEN.
+        The browser sends <code>Last-Event-ID</code> on each reconnect, so the counter
+        never resets — it resumes exactly where it dropped.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="connectUnstable()">Connect</button>
+        <button class="danger"  onclick="disconnectUnstable()">Disconnect</button>
+        <span id="unstable-status" class="status disconnected">disconnected</span>
+        <span id="unstable-ready" class="ready-state rs-closed">● 2 CLOSED</span>
+      </div>
+      <div class="meta-row">
+        <span>last-event-id:</span>
+        <span id="unstable-last-id" class="meta-value">—</span>
+      </div>
+      <div class="log-area"><div class="inner" id="unstable-inner"></div></div>
+    </div>
+
     <!-- Panel 5: Broadcast (was Panel 4) -->
     <div class="panel">
       <h2>Stream 4 — Broadcast</h2>
@@ -421,6 +443,43 @@
     document.getElementById('log-msg').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') triggerLog();
     });
+
+    // -----------------------------------------------------------------------
+    // Panel 6: Unstable connection
+    // -----------------------------------------------------------------------
+    let unstableSource = null;
+    let unstableReadyInterval = null;
+
+    function connectUnstable() {
+      if (unstableSource) unstableSource.close();
+      unstableSource = new EventSource('/stream/unstable');
+      setStatus('unstable-status', 'connected');
+      unstableReadyInterval = trackReadyState(unstableSource, 'unstable-ready');
+
+      unstableSource.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        document.getElementById('unstable-last-id').textContent = e.lastEventId || '—';
+        const resumed = d.resumed_from ? ` (resumed from id ${d.resumed_from})` : '';
+        appendLog(
+          'unstable-inner',
+          `count: ${d.count}  drop in: ${d.will_drop_in} event(s)${resumed}`,
+          d.will_drop_in === 1 ? 'alert' : 'system'
+        );
+      };
+
+      // onerror fires when the server closes — the browser will auto-reconnect
+      unstableSource.onerror = () => {
+        appendLog('unstable-inner', '↩ dropped — reconnecting with Last-Event-ID…', 'manual');
+      };
+    }
+
+    function disconnectUnstable() {
+      clearInterval(unstableReadyInterval);
+      if (unstableSource) { unstableSource.close(); unstableSource = null; }
+      setStatus('unstable-status', 'disconnected');
+      setReadyState('unstable-ready', 2);
+      appendLog('unstable-inner', '— disconnected —');
+    }
 
     // -----------------------------------------------------------------------
     // Panel 4: AI Token Streaming
