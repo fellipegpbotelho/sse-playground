@@ -36,6 +36,16 @@ check:  ## Lint + format check (no writes — for CI)
 	uv run ruff check .
 	uv run ruff format . --check
 
+# ── Docker ────────────────────────────────────────────────────────────────────
+
+.PHONY: docker-build
+docker-build:  ## Build the Docker image
+	docker build -t sse-playground .
+
+.PHONY: docker-run
+docker-run:  ## Run the app in Docker on port 8000
+	docker run --rm -p 8000:8000 sse-playground
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 .PHONY: clean
