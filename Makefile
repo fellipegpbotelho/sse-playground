@@ -36,6 +36,20 @@ check:  ## Lint + format check (no writes — for CI)
 	uv run ruff check .
 	uv run ruff format . --check
 
+# ── React frontend ────────────────────────────────────────────────────────────
+
+.PHONY: frontend-install
+frontend-install:  ## Install React frontend dependencies
+	cd frontend && npm install
+
+.PHONY: frontend-dev
+frontend-dev:  ## Start React dev server on :5173 (proxies API to FastAPI on :8000)
+	cd frontend && npm run dev
+
+.PHONY: frontend-build
+frontend-build:  ## Build React frontend for production
+	cd frontend && npm run build
+
 # ── Docker ────────────────────────────────────────────────────────────────────
 
 .PHONY: docker-build
