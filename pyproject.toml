@@ -9,3 +9,17 @@ dependencies = [
     "sse-starlette>=3.3.4",
     "uvicorn[standard]>=0.44.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.10",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"

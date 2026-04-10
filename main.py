@@ -9,8 +9,7 @@ Three streams:
 
 import asyncio
 import json
-import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -38,6 +37,7 @@ async def stream_notifications(request: Request):
       - data:  the JSON payload
       - event: named event type (browser uses addEventListener)
     """
+
     async def generator():
         counter = 0
         while True:
@@ -45,10 +45,11 @@ async def stream_notifications(request: Request):
                 break
 
             event_type = "info" if counter % 3 != 2 else "alert"
+            message = "System healthy" if event_type == "info" else "High memory usage detected!"
             payload = {
                 "id": counter,
-                "message": f"{'System healthy' if event_type == 'info' else 'High memory usage detected!'}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": message,
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             yield {"event": event_type, "data": json.dumps(payload)}
 
@@ -71,6 +72,7 @@ async def stream_progress(request: Request):
       - id:    lets browser resume with Last-Event-ID on reconnect
       - retry: hints how many ms the browser waits before reconnecting
     """
+
     async def generator():
         for step in range(11):
             if await request.is_disconnected():
@@ -79,7 +81,7 @@ async def stream_progress(request: Request):
             pct = step * 10
             yield {
                 "id": str(step),
-                "retry": 3000,   # browser reconnects after 3 s if connection drops
+                "retry": 3000,  # browser reconnects after 3 s if connection drops
                 "data": json.dumps({"step": step, "percent": pct, "done": pct == 100}),
             }
             await asyncio.sleep(0.8)
@@ -100,6 +102,7 @@ async def stream_logs(request: Request):
       - data: the log line
       - comment lines (:) for keep-alive heartbeats
     """
+
     async def generator():
         # Inject a welcome line immediately
         yield {"data": json.dumps({"level": "INFO", "msg": "Log stream connected", "ts": _now()})}
@@ -113,7 +116,7 @@ async def stream_logs(request: Request):
                     # Wait up to 15 s for a new log entry, then send a heartbeat comment
                     msg = await asyncio.wait_for(log_queue.get(), timeout=15)
                     yield {"data": msg}
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # SSE comment — keeps the TCP connection alive through proxies
                     yield {"comment": "heartbeat"}
         finally:
@@ -138,7 +141,7 @@ async def trigger_log(request: Request):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
