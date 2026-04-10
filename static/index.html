@@ -46,9 +46,19 @@
       background: #21262d;
       border: 1px solid #30363d;
     }
-    .status.connected { background: #0f2a1a; border-color: #2ea043; color: #3fb950; }
+    .status.connected    { background: #0f2a1a; border-color: #2ea043; color: #3fb950; }
     .status.disconnected { background: #21262d; color: #8b949e; }
-    .status.error { background: #2d1111; border-color: #dc2626; color: #f85149; }
+    .status.error        { background: #2d1111; border-color: #dc2626; color: #f85149; }
+
+    /* readyState badge */
+    .ready-state { font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; background: #21262d; border: 1px solid #30363d; }
+    .rs-connecting { color: #e3b341; border-color: #e3b341; }
+    .rs-open       { color: #3fb950; border-color: #2ea043; background: #0f2a1a; }
+    .rs-closed     { color: #8b949e; }
+
+    /* meta row (Last-Event-ID etc.) */
+    .meta-row { display: flex; gap: 8px; align-items: center; font-size: 0.75rem; color: #8b949e; }
+    .meta-value { color: #79c0ff; }
 
     /* Log output area */
     .log-area {
@@ -61,12 +71,12 @@
       font-size: 0.78rem;
       line-height: 1.6;
       display: flex;
-      flex-direction: column-reverse; /* newest at bottom */
+      flex-direction: column-reverse;
     }
     .log-area .inner { display: flex; flex-direction: column; gap: 2px; }
     .log-line { padding: 1px 0; }
-    .log-line.info { color: #58a6ff; }
-    .log-line.alert { color: #f85149; }
+    .log-line.info   { color: #58a6ff; }
+    .log-line.alert  { color: #f85149; }
     .log-line.manual { color: #d2a679; }
     .log-line.system { color: #8b949e; }
 
@@ -78,7 +88,7 @@
       border: none;
       background: #21262d;
     }
-    progress::-webkit-progress-bar { background: #21262d; border-radius: 4px; }
+    progress::-webkit-progress-bar  { background: #21262d; border-radius: 4px; }
     progress::-webkit-progress-value { background: #238636; border-radius: 4px; transition: width 0.3s; }
     .pct-label { font-size: 0.8rem; color: #3fb950; text-align: right; }
 
@@ -122,7 +132,7 @@
 </head>
 <body>
   <h1>SSE Playground</h1>
-  <p class="subtitle">Server-Sent Events demo — open DevTools → Network → EventStream to inspect the raw frames</p>
+  <p class="subtitle">Server-Sent Events demo — connect a stream and watch the readyState and Last-Event-ID change in real time</p>
 
   <div class="grid">
 
@@ -135,26 +145,32 @@
       </p>
       <div class="controls">
         <button class="primary" onclick="connectNotifications()">Connect</button>
-        <button class="danger" onclick="disconnectNotifications()">Disconnect</button>
+        <button class="danger"  onclick="disconnectNotifications()">Disconnect</button>
         <span id="notif-status" class="status disconnected">disconnected</span>
+        <span id="notif-ready" class="ready-state rs-closed">● 2 CLOSED</span>
       </div>
-      <div class="log-area" id="notif-log"><div class="inner" id="notif-inner"></div></div>
+      <div class="log-area"><div class="inner" id="notif-inner"></div></div>
     </div>
 
     <!-- Panel 2: Progress -->
     <div class="panel">
       <h2>Stream 2 — Progress</h2>
       <p class="desc">
-        One-shot stream with <code>id:</code> (last-event-id) and <code>retry:</code> fields.
-        The browser sends <code>Last-Event-ID</code> header on reconnect so the server can resume.
+        One-shot stream with <code>id:</code> and <code>retry:</code> fields.
+        On reconnect the browser sends <code>Last-Event-ID</code> so the server resumes from the right step.
       </p>
       <div class="controls">
         <button class="primary" onclick="startProgress()">Start</button>
         <span id="progress-status" class="status disconnected">disconnected</span>
+        <span id="progress-ready" class="ready-state rs-closed">● 2 CLOSED</span>
+      </div>
+      <div class="meta-row">
+        <span>last-event-id:</span>
+        <span id="progress-last-id" class="meta-value">—</span>
       </div>
       <progress id="progress-bar" value="0" max="100"></progress>
       <div class="pct-label" id="progress-label">0%</div>
-      <div class="log-area" id="progress-log"><div class="inner" id="progress-inner"></div></div>
+      <div class="log-area"><div class="inner" id="progress-inner"></div></div>
     </div>
 
     <!-- Panel 3: Logs -->
@@ -166,14 +182,15 @@
       </p>
       <div class="controls">
         <button class="primary" onclick="connectLogs()">Connect</button>
-        <button class="danger" onclick="disconnectLogs()">Disconnect</button>
+        <button class="danger"  onclick="disconnectLogs()">Disconnect</button>
         <span id="logs-status" class="status disconnected">disconnected</span>
+        <span id="logs-ready" class="ready-state rs-closed">● 2 CLOSED</span>
       </div>
       <div class="trigger-row">
         <input type="text" id="log-msg" placeholder="Custom log message…" />
         <button onclick="triggerLog()">Send</button>
       </div>
-      <div class="log-area" id="logs-log"><div class="inner" id="logs-inner"></div></div>
+      <div class="log-area"><div class="inner" id="logs-inner"></div></div>
     </div>
 
   </div>
@@ -196,17 +213,37 @@
 
   <script>
     // -----------------------------------------------------------------------
-    // Helpers
+    // readyState helpers
+    // -----------------------------------------------------------------------
+    const RS_LABELS  = ['● 0 CONNECTING', '● 1 OPEN', '● 2 CLOSED'];
+    const RS_CLASSES = ['rs-connecting',   'rs-open',  'rs-closed'];
+
+    function setReadyState(id, state) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = RS_LABELS[state];
+      el.className = `ready-state ${RS_CLASSES[state]}`;
+    }
+
+    // Poll readyState every 300 ms and update the badge.
+    // Returns the interval ID so the caller can clear it on disconnect.
+    function trackReadyState(source, id) {
+      return setInterval(() => {
+        if (!source) return;
+        setReadyState(id, source.readyState);
+      }, 300);
+    }
+
+    // -----------------------------------------------------------------------
+    // General helpers
     // -----------------------------------------------------------------------
     function appendLog(innerId, text, cls = 'system') {
       const inner = document.getElementById(innerId);
-      const line = document.createElement('div');
-      line.className = `log-line ${cls}`;
+      const line  = document.createElement('div');
+      line.className  = `log-line ${cls}`;
       line.textContent = text;
       inner.appendChild(line);
-      // Auto-scroll: the flex-direction:column-reverse means newest is at bottom
-      const area = inner.parentElement;
-      area.scrollTop = area.scrollHeight;
+      inner.parentElement.scrollTop = inner.parentElement.scrollHeight;
     }
 
     function setStatus(id, state) {
@@ -219,20 +256,19 @@
     // Panel 1: Notifications
     // -----------------------------------------------------------------------
     let notifSource = null;
+    let notifReadyInterval = null;
 
     function connectNotifications() {
       if (notifSource) notifSource.close();
-
       notifSource = new EventSource('/stream/notifications');
       setStatus('notif-status', 'connected');
+      notifReadyInterval = trackReadyState(notifSource, 'notif-ready');
 
-      // Named event: 'info'
       notifSource.addEventListener('info', (e) => {
         const d = JSON.parse(e.data);
         appendLog('notif-inner', `[INFO #${d.id}] ${d.message}  (${d.timestamp})`, 'info');
       });
 
-      // Named event: 'alert'
       notifSource.addEventListener('alert', (e) => {
         const d = JSON.parse(e.data);
         appendLog('notif-inner', `[ALERT #${d.id}] ${d.message}  (${d.timestamp})`, 'alert');
@@ -245,8 +281,10 @@
     }
 
     function disconnectNotifications() {
+      clearInterval(notifReadyInterval);
       if (notifSource) { notifSource.close(); notifSource = null; }
       setStatus('notif-status', 'disconnected');
+      setReadyState('notif-ready', 2);
       appendLog('notif-inner', '— disconnected —');
     }
 
@@ -254,36 +292,41 @@
     // Panel 2: Progress
     // -----------------------------------------------------------------------
     let progressSource = null;
+    let progressReadyInterval = null;
 
     function startProgress() {
       if (progressSource) progressSource.close();
-
-      // Reset UI
-      document.getElementById('progress-bar').value = 0;
+      document.getElementById('progress-bar').value   = 0;
       document.getElementById('progress-label').textContent = '0%';
-      document.getElementById('progress-inner').innerHTML = '';
+      document.getElementById('progress-inner').innerHTML   = '';
+      document.getElementById('progress-last-id').textContent = '—';
 
       progressSource = new EventSource('/stream/progress');
       setStatus('progress-status', 'connected');
+      progressReadyInterval = trackReadyState(progressSource, 'progress-ready');
 
       progressSource.onmessage = (e) => {
         const d = JSON.parse(e.data);
+        // Update Last-Event-ID display — this is what the browser will send on reconnect
+        document.getElementById('progress-last-id').textContent = e.lastEventId || '—';
         document.getElementById('progress-bar').value = d.percent;
-        document.getElementById('progress-label').textContent = `${d.percent}%  (last id: ${e.lastEventId})`;
+        document.getElementById('progress-label').textContent = `${d.percent}%`;
         appendLog(
           'progress-inner',
           `step ${d.step}/10 → ${d.percent}%  [id: ${e.lastEventId}]${d.done ? '  ✓ DONE' : ''}`,
           d.done ? 'info' : 'system'
         );
         if (d.done) {
+          clearInterval(progressReadyInterval);
           progressSource.close();
           setStatus('progress-status', 'disconnected');
+          setReadyState('progress-ready', 2);
         }
       };
 
       progressSource.onerror = () => {
         setStatus('progress-status', 'error');
-        appendLog('progress-inner', '⚠ Connection error — browser will retry with Last-Event-ID…', 'alert');
+        appendLog('progress-inner', '⚠ Dropped — browser will retry with Last-Event-ID…', 'alert');
       };
     }
 
@@ -291,15 +334,16 @@
     // Panel 3: Logs
     // -----------------------------------------------------------------------
     let logsSource = null;
+    let logsReadyInterval = null;
 
     function connectLogs() {
       if (logsSource) logsSource.close();
-
       logsSource = new EventSource('/stream/logs');
       setStatus('logs-status', 'connected');
+      logsReadyInterval = trackReadyState(logsSource, 'logs-ready');
 
       logsSource.onmessage = (e) => {
-        const d = JSON.parse(e.data);
+        const d   = JSON.parse(e.data);
         const cls = d.level === 'MANUAL' ? 'manual' : d.level === 'INFO' ? 'info' : 'system';
         appendLog('logs-inner', `[${d.ts}] ${d.level}: ${d.msg}`, cls);
       };
@@ -311,14 +355,16 @@
     }
 
     function disconnectLogs() {
+      clearInterval(logsReadyInterval);
       if (logsSource) { logsSource.close(); logsSource = null; }
       setStatus('logs-status', 'disconnected');
+      setReadyState('logs-ready', 2);
       appendLog('logs-inner', '— disconnected —');
     }
 
     async function triggerLog() {
       const input = document.getElementById('log-msg');
-      const msg = input.value.trim() || 'Ping from browser';
+      const msg   = input.value.trim() || 'Ping from browser';
       input.value = '';
       await fetch('/trigger-log', {
         method: 'POST',
@@ -327,7 +373,6 @@
       });
     }
 
-    // Send on Enter key
     document.getElementById('log-msg').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') triggerLog();
     });
