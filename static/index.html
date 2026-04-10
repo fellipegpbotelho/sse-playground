@@ -193,7 +193,29 @@
       <div class="log-area"><div class="inner" id="logs-inner"></div></div>
     </div>
 
-    <!-- Panel 4: Broadcast -->
+    <!-- Panel 4: AI Token Streaming -->
+    <div class="panel">
+      <h2>Stream 4 — AI Token Streaming</h2>
+      <p class="desc">
+        Yields a response one word at a time — the exact pattern used by ChatGPT, Claude,
+        and every LLM chat UI. Each token is a separate SSE event with an <code>id:</code>
+        so streaming can resume mid-sentence if the connection drops.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="startAI()">Generate</button>
+        <button class="danger"  onclick="stopAI()">Stop</button>
+        <span id="ai-status" class="status disconnected">disconnected</span>
+        <span id="ai-ready" class="ready-state rs-closed">● 2 CLOSED</span>
+      </div>
+      <div class="meta-row">
+        <span>last-event-id:</span>
+        <span id="ai-last-id" class="meta-value">—</span>
+      </div>
+      <!-- Text builds up word by word here -->
+      <div id="ai-output" style="background:#010409;border:1px solid #30363d;border-radius:4px;padding:10px;min-height:80px;font-size:0.85rem;line-height:1.7;color:#c9d1d9;white-space:pre-wrap;"></div>
+    </div>
+
+    <!-- Panel 5: Broadcast (was Panel 4) -->
     <div class="panel">
       <h2>Stream 4 — Broadcast</h2>
       <p class="desc">
@@ -401,7 +423,46 @@
     });
 
     // -----------------------------------------------------------------------
-    // Panel 4: Broadcast
+    // Panel 4: AI Token Streaming
+    // -----------------------------------------------------------------------
+    let aiSource = null;
+    let aiReadyInterval = null;
+
+    function startAI() {
+      if (aiSource) aiSource.close();
+      document.getElementById('ai-output').textContent = '';
+      document.getElementById('ai-last-id').textContent = '—';
+
+      aiSource = new EventSource('/stream/ai');
+      setStatus('ai-status', 'connected');
+      aiReadyInterval = trackReadyState(aiSource, 'ai-ready');
+
+      aiSource.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        document.getElementById('ai-last-id').textContent = e.lastEventId || '—';
+        document.getElementById('ai-output').textContent += d.token;
+        if (d.done) {
+          clearInterval(aiReadyInterval);
+          aiSource.close(); aiSource = null;
+          setStatus('ai-status', 'disconnected');
+          setReadyState('ai-ready', 2);
+        }
+      };
+
+      aiSource.onerror = () => {
+        setStatus('ai-status', 'error');
+      };
+    }
+
+    function stopAI() {
+      clearInterval(aiReadyInterval);
+      if (aiSource) { aiSource.close(); aiSource = null; }
+      setStatus('ai-status', 'disconnected');
+      setReadyState('ai-ready', 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel 5: Broadcast
     // -----------------------------------------------------------------------
     let broadcastSource = null;
     let broadcastReadyInterval = null;

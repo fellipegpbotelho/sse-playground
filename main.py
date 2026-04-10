@@ -6,6 +6,7 @@ Streams:
   /stream/progress       — one-shot stream with id: and retry: fields
   /stream/logs           — async queue, manual push via POST /trigger-log
   /stream/broadcast      — fan-out: one POST pushes to ALL connected clients
+  /stream/ai             — token-by-token streaming, like ChatGPT
 """
 
 import asyncio
@@ -146,7 +147,52 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Stream 4: Broadcast — fan-out to all connected clients
+# Stream 4: AI token streaming — word-by-word, like ChatGPT
+# ---------------------------------------------------------------------------
+
+# The text is about SSE itself — meta and educational.
+_AI_TEXT = (
+    "SSE stands for Server-Sent Events. "
+    "It is a one-way channel from server to browser over plain HTTP. "
+    "The browser opens a single GET request and the server keeps the connection alive, "
+    "writing text frames separated by blank lines. "
+    "Each frame carries a payload in the data field, "
+    "an optional event name, an id for resumability, and a retry hint. "
+    "The browser automatically reconnects if the connection drops, "
+    "replaying the last seen id so the server can resume the stream without gaps. "
+    "This makes SSE ideal for live feeds, progress bars, log tailing, "
+    "and token-by-token AI responses — exactly like this one."
+)
+
+
+@app.get("/stream/ai")
+async def stream_ai(request: Request):
+    """
+    Yields the response one word at a time with a short delay between tokens.
+    This is the exact pattern used by ChatGPT, Claude, and every other LLM chat UI.
+
+    SSE fields demonstrated:
+      - id:   token index — browser tracks it as lastEventId
+      - data: the token chunk + done flag
+    """
+
+    async def generator():
+        words = _AI_TEXT.split()
+        for i, word in enumerate(words):
+            if await request.is_disconnected():
+                break
+            yield {
+                "id": str(i),
+                "data": json.dumps({"token": word + " ", "done": False}),
+            }
+            await asyncio.sleep(0.07)
+        yield {"data": json.dumps({"token": "", "done": True})}
+
+    return EventSourceResponse(generator())
+
+
+# ---------------------------------------------------------------------------
+# Stream 5: Broadcast — fan-out to all connected clients
 # ---------------------------------------------------------------------------
 
 # One queue per open connection. POST /broadcast puts a message into every queue.
