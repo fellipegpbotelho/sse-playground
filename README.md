@@ -4,6 +4,8 @@ A hands-on project for learning **Server-Sent Events (SSE)** — the simplest wa
 
 Built with **FastAPI** (Python) and **vanilla JavaScript**. No frontend framework, no build step — so you can focus entirely on understanding SSE.
 
+![SSE Playground preview](docs/preview.png)
+
 ## What you will learn
 
 - What SSE is and how it differs from WebSockets and polling
