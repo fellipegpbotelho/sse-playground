@@ -1,0 +1,11 @@
+[project]
+name = "sse-playground"
+version = "0.1.0"
+description = "A hands-on playground for learning Server-Sent Events (SSE) with FastAPI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.3",
+    "sse-starlette>=3.3.4",
+    "uvicorn[standard]>=0.44.0",
+]

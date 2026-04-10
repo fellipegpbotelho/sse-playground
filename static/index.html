@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SSE Playground</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 24px; }
+    h1 { font-size: 1.4rem; margin-bottom: 4px; color: #58a6ff; }
+    .subtitle { color: #8b949e; font-size: 0.85rem; margin-bottom: 24px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .panel h2 { font-size: 1rem; color: #f0f6fc; }
+    .panel .desc { font-size: 0.78rem; color: #8b949e; line-height: 1.5; }
+
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button:hover { background: #30363d; }
+    button.primary { background: #238636; border-color: #2ea043; color: #fff; }
+    button.primary:hover { background: #2ea043; }
+    button.danger { background: #b91c1c; border-color: #dc2626; color: #fff; }
+    button.danger:hover { background: #dc2626; }
+
+    .status {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #21262d;
+      border: 1px solid #30363d;
+    }
+    .status.connected { background: #0f2a1a; border-color: #2ea043; color: #3fb950; }
+    .status.disconnected { background: #21262d; color: #8b949e; }
+    .status.error { background: #2d1111; border-color: #dc2626; color: #f85149; }
+
+    /* Log output area */
+    .log-area {
+      background: #010409;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 10px;
+      height: 200px;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column-reverse; /* newest at bottom */
+    }
+    .log-area .inner { display: flex; flex-direction: column; gap: 2px; }
+    .log-line { padding: 1px 0; }
+    .log-line.info { color: #58a6ff; }
+    .log-line.alert { color: #f85149; }
+    .log-line.manual { color: #d2a679; }
+    .log-line.system { color: #8b949e; }
+
+    /* Progress bar */
+    progress {
+      width: 100%;
+      height: 14px;
+      border-radius: 4px;
+      border: none;
+      background: #21262d;
+    }
+    progress::-webkit-progress-bar { background: #21262d; border-radius: 4px; }
+    progress::-webkit-progress-value { background: #238636; border-radius: 4px; transition: width 0.3s; }
+    .pct-label { font-size: 0.8rem; color: #3fb950; text-align: right; }
+
+    /* Trigger log input */
+    .trigger-row { display: flex; gap: 8px; }
+    .trigger-row input {
+      flex: 1;
+      background: #010409;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    /* SSE concept explainer */
+    .explainer {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+      font-size: 0.8rem;
+      line-height: 1.8;
+      color: #8b949e;
+    }
+    .explainer h2 { font-size: 0.95rem; color: #f0f6fc; margin-bottom: 10px; }
+    .explainer code {
+      background: #010409;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: #79c0ff;
+      font-family: monospace;
+    }
+    .explainer table { width: 100%; border-collapse: collapse; }
+    .explainer td, .explainer th { border: 1px solid #30363d; padding: 6px 10px; }
+    .explainer th { color: #f0f6fc; background: #0d1117; }
+  </style>
+</head>
+<body>
+  <h1>SSE Playground</h1>
+  <p class="subtitle">Server-Sent Events demo — open DevTools → Network → EventStream to inspect the raw frames</p>
+
+  <div class="grid">
+
+    <!-- Panel 1: Notifications -->
+    <div class="panel">
+      <h2>Stream 1 — Notifications</h2>
+      <p class="desc">
+        Periodic push every 2 s. Uses <code>event:</code> field so the browser
+        distinguishes <em>info</em> vs <em>alert</em> via <code>addEventListener</code>.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="connectNotifications()">Connect</button>
+        <button class="danger" onclick="disconnectNotifications()">Disconnect</button>
+        <span id="notif-status" class="status disconnected">disconnected</span>
+      </div>
+      <div class="log-area" id="notif-log"><div class="inner" id="notif-inner"></div></div>
+    </div>
+
+    <!-- Panel 2: Progress -->
+    <div class="panel">
+      <h2>Stream 2 — Progress</h2>
+      <p class="desc">
+        One-shot stream with <code>id:</code> (last-event-id) and <code>retry:</code> fields.
+        The browser sends <code>Last-Event-ID</code> header on reconnect so the server can resume.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="startProgress()">Start</button>
+        <span id="progress-status" class="status disconnected">disconnected</span>
+      </div>
+      <progress id="progress-bar" value="0" max="100"></progress>
+      <div class="pct-label" id="progress-label">0%</div>
+      <div class="log-area" id="progress-log"><div class="inner" id="progress-inner"></div></div>
+    </div>
+
+    <!-- Panel 3: Logs -->
+    <div class="panel">
+      <h2>Stream 3 — Logs</h2>
+      <p class="desc">
+        Events queued server-side via <code>asyncio.Queue</code>. Sends SSE comment
+        lines (<code>: heartbeat</code>) every 15 s to keep the connection alive through proxies.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="connectLogs()">Connect</button>
+        <button class="danger" onclick="disconnectLogs()">Disconnect</button>
+        <span id="logs-status" class="status disconnected">disconnected</span>
+      </div>
+      <div class="trigger-row">
+        <input type="text" id="log-msg" placeholder="Custom log message…" />
+        <button onclick="triggerLog()">Send</button>
+      </div>
+      <div class="log-area" id="logs-log"><div class="inner" id="logs-inner"></div></div>
+    </div>
+
+  </div>
+
+  <!-- SSE Concept Table -->
+  <div class="explainer">
+    <h2>SSE Wire Format — Quick Reference</h2>
+    <table>
+      <tr><th>Field</th><th>Example</th><th>Purpose</th></tr>
+      <tr><td><code>data:</code></td><td><code>data: {"msg":"hi"}</code></td><td>The payload. Multi-line data uses multiple <code>data:</code> lines.</td></tr>
+      <tr><td><code>event:</code></td><td><code>event: alert</code></td><td>Named event type. Browser calls matching <code>addEventListener('alert', …)</code>.</td></tr>
+      <tr><td><code>id:</code></td><td><code>id: 42</code></td><td>Event ID. Browser stores as <code>lastEventId</code> and sends as <code>Last-Event-ID</code> header on reconnect.</td></tr>
+      <tr><td><code>retry:</code></td><td><code>retry: 3000</code></td><td>Override browser reconnect delay (ms). Default is ~3000 ms.</td></tr>
+      <tr><td><code>: comment</code></td><td><code>: heartbeat</code></td><td>Ignored by browser, but resets proxy timeout clocks.</td></tr>
+    </table>
+    <br>
+    Events are separated by a blank line (<code>\n\n</code>).
+    The content-type must be <code>text/event-stream</code> with <code>Cache-Control: no-cache</code>.
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    function appendLog(innerId, text, cls = 'system') {
+      const inner = document.getElementById(innerId);
+      const line = document.createElement('div');
+      line.className = `log-line ${cls}`;
+      line.textContent = text;
+      inner.appendChild(line);
+      // Auto-scroll: the flex-direction:column-reverse means newest is at bottom
+      const area = inner.parentElement;
+      area.scrollTop = area.scrollHeight;
+    }
+
+    function setStatus(id, state) {
+      const el = document.getElementById(id);
+      el.textContent = state;
+      el.className = `status ${state}`;
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel 1: Notifications
+    // -----------------------------------------------------------------------
+    let notifSource = null;
+
+    function connectNotifications() {
+      if (notifSource) notifSource.close();
+
+      notifSource = new EventSource('/stream/notifications');
+      setStatus('notif-status', 'connected');
+
+      // Named event: 'info'
+      notifSource.addEventListener('info', (e) => {
+        const d = JSON.parse(e.data);
+        appendLog('notif-inner', `[INFO #${d.id}] ${d.message}  (${d.timestamp})`, 'info');
+      });
+
+      // Named event: 'alert'
+      notifSource.addEventListener('alert', (e) => {
+        const d = JSON.parse(e.data);
+        appendLog('notif-inner', `[ALERT #${d.id}] ${d.message}  (${d.timestamp})`, 'alert');
+      });
+
+      notifSource.onerror = () => {
+        setStatus('notif-status', 'error');
+        appendLog('notif-inner', '⚠ Connection error — browser will retry…', 'alert');
+      };
+    }
+
+    function disconnectNotifications() {
+      if (notifSource) { notifSource.close(); notifSource = null; }
+      setStatus('notif-status', 'disconnected');
+      appendLog('notif-inner', '— disconnected —');
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel 2: Progress
+    // -----------------------------------------------------------------------
+    let progressSource = null;
+
+    function startProgress() {
+      if (progressSource) progressSource.close();
+
+      // Reset UI
+      document.getElementById('progress-bar').value = 0;
+      document.getElementById('progress-label').textContent = '0%';
+      document.getElementById('progress-inner').innerHTML = '';
+
+      progressSource = new EventSource('/stream/progress');
+      setStatus('progress-status', 'connected');
+
+      progressSource.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        document.getElementById('progress-bar').value = d.percent;
+        document.getElementById('progress-label').textContent = `${d.percent}%  (last id: ${e.lastEventId})`;
+        appendLog(
+          'progress-inner',
+          `step ${d.step}/10 → ${d.percent}%  [id: ${e.lastEventId}]${d.done ? '  ✓ DONE' : ''}`,
+          d.done ? 'info' : 'system'
+        );
+        if (d.done) {
+          progressSource.close();
+          setStatus('progress-status', 'disconnected');
+        }
+      };
+
+      progressSource.onerror = () => {
+        setStatus('progress-status', 'error');
+        appendLog('progress-inner', '⚠ Connection error — browser will retry with Last-Event-ID…', 'alert');
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel 3: Logs
+    // -----------------------------------------------------------------------
+    let logsSource = null;
+
+    function connectLogs() {
+      if (logsSource) logsSource.close();
+
+      logsSource = new EventSource('/stream/logs');
+      setStatus('logs-status', 'connected');
+
+      logsSource.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        const cls = d.level === 'MANUAL' ? 'manual' : d.level === 'INFO' ? 'info' : 'system';
+        appendLog('logs-inner', `[${d.ts}] ${d.level}: ${d.msg}`, cls);
+      };
+
+      logsSource.onerror = () => {
+        setStatus('logs-status', 'error');
+        appendLog('logs-inner', '⚠ Connection error', 'alert');
+      };
+    }
+
+    function disconnectLogs() {
+      if (logsSource) { logsSource.close(); logsSource = null; }
+      setStatus('logs-status', 'disconnected');
+      appendLog('logs-inner', '— disconnected —');
+    }
+
+    async function triggerLog() {
+      const input = document.getElementById('log-msg');
+      const msg = input.value.trim() || 'Ping from browser';
+      input.value = '';
+      await fetch('/trigger-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg }),
+      });
+    }
+
+    // Send on Enter key
+    document.getElementById('log-msg').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') triggerLog();
+    });
+  </script>
+</body>
+</html>
