@@ -193,6 +193,29 @@
       <div class="log-area"><div class="inner" id="logs-inner"></div></div>
     </div>
 
+    <!-- Panel 4: Broadcast -->
+    <div class="panel">
+      <h2>Stream 4 — Broadcast</h2>
+      <p class="desc">
+        Fan-out pattern: one <code>POST /broadcast</code> delivers the same message to
+        <em>every</em> connected client simultaneously. Each client has its own
+        <code>asyncio.Queue</code> on the server.
+        <br><br>
+        Open this page in two tabs, connect both, then send a message — both receive it.
+      </p>
+      <div class="controls">
+        <button class="primary" onclick="connectBroadcast()">Connect</button>
+        <button class="danger"  onclick="disconnectBroadcast()">Disconnect</button>
+        <span id="broadcast-status" class="status disconnected">disconnected</span>
+        <span id="broadcast-ready" class="ready-state rs-closed">● 2 CLOSED</span>
+      </div>
+      <div class="trigger-row">
+        <input type="text" id="broadcast-msg" placeholder="Message to all clients…" />
+        <button onclick="sendBroadcast()">Broadcast</button>
+      </div>
+      <div class="log-area"><div class="inner" id="broadcast-inner"></div></div>
+    </div>
+
   </div>
 
   <!-- SSE Concept Table -->
@@ -375,6 +398,52 @@
 
     document.getElementById('log-msg').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') triggerLog();
+    });
+
+    // -----------------------------------------------------------------------
+    // Panel 4: Broadcast
+    // -----------------------------------------------------------------------
+    let broadcastSource = null;
+    let broadcastReadyInterval = null;
+
+    function connectBroadcast() {
+      if (broadcastSource) broadcastSource.close();
+      broadcastSource = new EventSource('/stream/broadcast');
+      setStatus('broadcast-status', 'connected');
+      broadcastReadyInterval = trackReadyState(broadcastSource, 'broadcast-ready');
+
+      broadcastSource.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        appendLog('broadcast-inner', `[${d.ts}] ${d.msg}  (${d.clients} client(s) connected)`, 'info');
+      };
+
+      broadcastSource.onerror = () => {
+        setStatus('broadcast-status', 'error');
+        appendLog('broadcast-inner', '⚠ Connection error', 'alert');
+      };
+    }
+
+    function disconnectBroadcast() {
+      clearInterval(broadcastReadyInterval);
+      if (broadcastSource) { broadcastSource.close(); broadcastSource = null; }
+      setStatus('broadcast-status', 'disconnected');
+      setReadyState('broadcast-ready', 2);
+      appendLog('broadcast-inner', '— disconnected —');
+    }
+
+    async function sendBroadcast() {
+      const input = document.getElementById('broadcast-msg');
+      const msg   = input.value.trim() || 'Hello everyone!';
+      input.value = '';
+      await fetch('/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg }),
+      });
+    }
+
+    document.getElementById('broadcast-msg').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendBroadcast();
     });
   </script>
 </body>

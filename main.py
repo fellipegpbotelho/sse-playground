@@ -1,10 +1,11 @@
 """
 SSE Playground — demonstrates Server-Sent Events with FastAPI.
 
-Three streams:
+Streams:
   /stream/notifications  — periodic push, named events (info/alert)
   /stream/progress       — one-shot stream with id: and retry: fields
   /stream/logs           — async queue, manual push via POST /trigger-log
+  /stream/broadcast      — fan-out: one POST pushes to ALL connected clients
 """
 
 import asyncio
@@ -142,6 +143,58 @@ async def trigger_log(request: Request):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Stream 4: Broadcast — fan-out to all connected clients
+# ---------------------------------------------------------------------------
+
+# One queue per open connection. POST /broadcast puts a message into every queue.
+broadcast_clients: set[asyncio.Queue] = set()
+
+
+@app.get("/stream/broadcast")
+async def stream_broadcast(request: Request):
+    """
+    Each connected client gets its own asyncio.Queue.
+    POST /broadcast pushes the same message into every queue simultaneously.
+
+    SSE concept demonstrated:
+      - fan-out pattern: one producer, many consumers
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    broadcast_clients.add(queue)
+
+    async def generator():
+        yield {
+            "data": json.dumps(
+                {"msg": "Connected to broadcast", "clients": len(broadcast_clients), "ts": _now()}
+            )
+        }
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield {"data": msg}
+                except TimeoutError:
+                    yield {"comment": "heartbeat"}
+        finally:
+            broadcast_clients.discard(queue)
+
+    return EventSourceResponse(generator())
+
+
+@app.post("/broadcast")
+async def broadcast(request: Request):
+    """Push a message to every open /stream/broadcast connection at once."""
+    body = await request.json()
+    msg = body.get("msg", "Broadcast message")
+    entry = json.dumps({"msg": msg, "clients": len(broadcast_clients), "ts": _now()})
+    for q in broadcast_clients:
+        await q.put(entry)
+    return {"delivered_to": len(broadcast_clients)}
 
 
 # ---------------------------------------------------------------------------
